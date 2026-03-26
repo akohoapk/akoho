@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AKOHO — Diagnostic</title>
+<style>
+  body { font-family: sans-serif; background: #1a1a1a; color: #fff; padding: 20px; margin: 0; }
+  h2 { color: #ff5252; margin-bottom: 16px; }
+  .btn { display: block; width: 100%; padding: 16px; background: #B71C1C; color: white;
+    border: none; border-radius: 10px; font-size: 16px; cursor: pointer; margin: 8px 0; }
+  .btn.vert { background: #2e7d32; }
+  .btn.bleu { background: #1565C0; }
+  .result { background: #2a2a2a; padding: 14px; border-radius: 8px; margin: 8px 0;
+    font-size: 13px; line-height: 1.8; word-break: break-all; display: none; }
+  .ok { color: #69f0ae; }
+  .err { color: #ff5252; }
+  .label { color: #aaa; font-size: 11px; margin-bottom: 6px; display: block; text-transform: uppercase; }
+  input { width: 100%; padding: 12px; background: #333; border: 1px solid #555;
+    border-radius: 8px; color: #fff; font-size: 14px; margin-bottom: 8px; box-sizing: border-box; }
+  .sep { border-top: 1px solid #333; margin: 16px 0; }
+</style>
+</head>
+<body>
+
+<h2>🔧 AKOHO Diagnostic</h2>
+
+<label class="label">URL Google Apps Script</label>
+<input id="gas-url" type="url" placeholder="https://script.google.com/macros/s/…" 
+  oninput="localStorage.setItem('ak_adm_gas_url', JSON.stringify(this.value))">
+
+<button class="btn bleu" onclick="chargerUrl()">📂 Charger l'URL sauvegardée</button>
+
+<div class="sep"></div>
+
+<button class="btn" onclick="testerPing()">1️⃣ Tester la connexion GAS (ping)</button>
+<div class="result" id="r-ping"></div>
+
+<button class="btn" onclick="testerLogin()">2️⃣ Tester login_admin</button>
+<div class="result" id="r-login"></div>
+
+<button class="btn vert" onclick="testerStats()">3️⃣ Tester get_stats (avec jeton)</button>
+<div class="result" id="r-stats"></div>
+
+<div class="sep"></div>
+
+<button class="btn" onclick="voirSession()">👁 Voir la session stockée</button>
+<div class="result" id="r-sess"></div>
+
+<button class="btn" style="background:#555" onclick="effacerSession()">🗑 Effacer la session stockée</button>
+<div class="result" id="r-eff"></div>
+
+<script>
+let jetonTest = null;
+let expireTest = null;
+
+function gasUrl() {
+  return document.getElementById('gas-url').value.trim();
+}
+
+function chargerUrl() {
+  try {
+    const v = localStorage.getItem('ak_adm_gas_url');
+    if (v) document.getElementById('gas-url').value = JSON.parse(v);
+    afficher('r-ping', '✅ URL chargée depuis la mémoire du navigateur', true);
+  } catch(e) {
+    afficher('r-ping', '❌ Rien en mémoire', false);
+  }
+}
+
+function afficher(id, msg, ok) {
+  const el = document.getElementById(id);
+  el.style.display = 'block';
+  el.innerHTML = '<span class="'+(ok?'ok':'err')+'">'+msg+'</span>';
+}
+
+async function gas(payload) {
+  const url = gasUrl();
+  if (!url) { alert('Entrez l\'URL GAS d\'abord !'); throw new Error('no_url'); }
+  const r = await fetch(url + '?d=' + encodeURIComponent(JSON.stringify(payload)), {redirect:'follow'});
+  return r.json();
+}
+
+async function testerPing() {
+  afficher('r-ping', '⏳ Test en cours…', true);
+  try {
+    const url = gasUrl();
+    if (!url) { afficher('r-ping', '❌ Entrez l\'URL GAS d\'abord', false); return; }
+    const r = await fetch(url + '?d=' + encodeURIComponent(JSON.stringify({type:'ping'})), {redirect:'follow'});
+    const txt = await r.text();
+    afficher('r-ping', '✅ GAS accessible — Réponse : ' + txt.slice(0,100), true);
+  } catch(e) {
+    afficher('r-ping', '❌ GAS inaccessible — ' + e.message, false);
+  }
+}
+
+async function testerLogin() {
+  afficher('r-login', '⏳ Login en cours…', true);
+  try {
+    const d = await gas({type:'login_admin', mdp:'akoho2026'});
+    if (d.ok) {
+      jetonTest = d.jeton;
+      expireTest = String(d.expire);
+      afficher('r-login', '✅ Login OK !\nJeton : ' + d.jeton + '\nExpire dans : ' + Math.round((d.expire - Date.now())/60000) + ' min', true);
+    } else {
+      afficher('r-login', '❌ Login refusé — ' + d.error, false);
+    }
+  } catch(e) {
+    afficher('r-login', '❌ Erreur — ' + e.message, false);
+  }
+}
+
+async function testerStats() {
+  if (!jetonTest) { afficher('r-stats', '⚠️ Faites d\'abord le test login (étape 2)', false); return; }
+  afficher('r-stats', '⏳ Récupération stats…', true);
+  try {
+    const d = await gas({type:'get_stats', jeton:jetonTest, expire:expireTest});
+    if (d.ok) {
+      afficher('r-stats', '✅ Stats OK !\nTotal : '+d.total+' | Essai : '+d.enEssai+' | Expirés : '+d.expires+' | Licenciés : '+d.licencies, true);
+    } else {
+      afficher('r-stats', '❌ Stats refusées — ' + d.error, false);
+    }
+  } catch(e) {
+    afficher('r-stats', '❌ Erreur — ' + e.message, false);
+  }
+}
+
+function voirSession() {
+  try {
+    const s = localStorage.getItem('ak_adm_sess');
+    if (!s) { afficher('r-sess', '⚠️ Aucune session stockée', false); return; }
+    const obj = JSON.parse(s);
+    const expire = parseInt(obj.expire);
+    const restant = Math.round((expire - Date.now()) / 60000);
+    afficher('r-sess',
+      'Jeton : ' + obj.jeton + '\n' +
+      'Expire : ' + new Date(expire).toLocaleString('fr-FR') + '\n' +
+      (restant > 0 ? '✅ Valide encore ' + restant + ' min' : '❌ EXPIRÉE depuis ' + Math.abs(restant) + ' min'),
+      restant > 0
+    );
+  } catch(e) {
+    afficher('r-sess', '❌ Erreur lecture session — ' + e.message, false);
+  }
+}
+
+function effacerSession() {
+  localStorage.removeItem('ak_adm_sess');
+  afficher('r-eff', '✅ Session effacée — retournez sur admin.html et reconnectez-vous', true);
+}
+
+// Charger l'URL au démarrage si dispo
+window.onload = () => { chargerUrl(); };
+</script>
+</body>
+</html>
